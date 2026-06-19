@@ -1,11 +1,15 @@
 from app.config.llm import llm
+from langsmith import traceable
 
-
+@traceable
 def rewrite_question(state):
 
     question = state["question"]
-    history = state.get("chat_history", [])
-
+    history = state.get("messages", [])
+    history_text = "\n".join(
+        msg.content
+        for msg in history[-10:]
+    )
     prompt = f"""
 You are a query rewriting assistant.
 
@@ -18,7 +22,7 @@ Rules:
 - DO NOT answer
 
 Chat History:
-{chr(10).join(history[-6:])}
+{history_text}
 
 Question:
 {question}
@@ -29,9 +33,7 @@ Return only the rewritten query:
     response = llm.invoke(prompt)
 
     retrieval_query = response.content.strip()
-    print("REWRITE NODE EXECUTED")
-    print("QUESTION:", question)
-    print("REWRITTEN:", retrieval_query)
+    
     return {
         **state,
         "retrieval_query": retrieval_query

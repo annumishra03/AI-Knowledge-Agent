@@ -13,8 +13,4 @@ def calculator_tool(state):
     return {
         **state,
         "answer": answer,
-        "new_messages": [
-            f"User: {question}",
-            f"Assistant: {answer}"
-        ]
     }

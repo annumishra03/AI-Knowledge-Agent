@@ -1,7 +1,8 @@
 from app.config.llm import llm
 from app.graph.state import GraphState
+from langsmith import traceable
 
-
+@traceable
 def route_question(state: GraphState) -> str:
     question = state["question"]
     history = state.get("chat_history", [])

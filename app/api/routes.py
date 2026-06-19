@@ -1,15 +1,21 @@
+import time
 from fastapi import APIRouter, UploadFile, File
 import os
+
+from fastapi.responses import StreamingResponse
 
 from app.ingestion.loader import load_pdf
 from app.ingestion.splitter import split_documents
 from app.schemas.request import QuestionRequest
 from app.vectorStore.store import add_documents
 from app.graph.workflow import app_graph
+from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessageChunk
+
 route = APIRouter()
 
-from app.memory.redis_memory import session_store
-
+from app.memory.redis_memory import RedisSessionStore
+session_store = RedisSessionStore()
 @route.get("/")
 def health():
     return {"status": "running"}
@@ -50,28 +56,62 @@ async def upload_documents(file: UploadFile = File(...)):
         "filename": file.filename
     }
 
-@route.post("/ask")
-def ask(req: QuestionRequest):
-    history = session_store.get(req.session_id)
-    print(req.session_id, history)
+@route.post("/ask-stream")
+async def ask_stream(req: QuestionRequest):
+
     state = {
+        "messages": [
+            HumanMessage(content=req.question)
+        ],
         "question": req.question,
         "retrieval_query": "",
-        "chat_history": history,
         "context": [],
         "answer": "",
         "route": "",
-        "new_messages": []   # 👈 IMPORTANT
     }
 
-    result = app_graph.invoke(state)
+    async def generate():
 
-    # append only new messages
-    session_store.append(
-        req.session_id,
-        result.get("new_messages", [])
+        config = {
+            "configurable": {
+                "thread_id": req.session_id
+            }
+        }
+
+        full_response = ""
+
+        try:
+
+            for event, metadata in app_graph.stream(
+                state,
+                config=config,
+                stream_mode="messages"
+            ):
+                if not isinstance(event, AIMessageChunk):
+                    continue
+
+                node = metadata.get("langgraph_node")
+                if event.content and node in ["direct_node", "retrieve_node", "web"]:
+                    yield event.content
+
+        except Exception as e:
+            print("STREAM ERROR:", str(e))
+            raise
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream"
     )
     
-    return result
+@route.get("/check-state")
+def getFullState():
+    config = {
+    "configurable": {
+        "thread_id": "bollywood"
+    }
+    }
 
-    
+    state = app_graph.get_state(config)
+
+    print(state)
+    return state

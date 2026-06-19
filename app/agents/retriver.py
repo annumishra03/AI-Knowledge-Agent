@@ -1,6 +1,7 @@
 from app.vectorStore.store import retrieve_documents
+from langsmith import traceable
 
-
+@traceable
 def retrieve(state):
 
     query = state.get("retrieval_query") or state["question"]

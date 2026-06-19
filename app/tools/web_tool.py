@@ -2,16 +2,19 @@ import os
 from app.config.llm import llm
 from tavily import TavilyClient
 from dotenv import load_dotenv
-
+from langchain_core.messages import AIMessage
+from langsmith import traceable
 load_dotenv()
 client = TavilyClient(
     api_key=os.getenv("TAVILY_API_KEY")
 )
 
+@traceable
 def web_tool(state):
 
     question = state.get("retrieval_query", state['question'])
-    history = state.get("chat_history", [])
+    summary = state.get("summary", [])
+    history = state.get("messages", [])
 
     response = client.search(
         query=question,
@@ -24,13 +27,21 @@ def web_tool(state):
     context = "\n\n".join(
         [r["content"] for r in results]
     )
-    history_text = "\n".join(history[-5:])
+    history_text = "\n".join(
+        msg.content
+        for msg in history[-10:]
+    )
 
     prompt = f"""
     You are a helpful AI assistant.
 
-    Use conversation history if needed.
+    Use conversation history and summary if needed.
     Answer the user's question using the web search context below.
+
+    Conversation Summary:
+
+    {summary}
+
     CHAT HISTORY:
     {history_text}
 
@@ -46,15 +57,15 @@ def web_tool(state):
     - Summarize intelligently
     """
 
-    response = llm.invoke(prompt)
+    answer = ""
 
-    answer = response.content
+    for chunk in llm.stream(prompt):
+        answer += chunk.content
 
     return {
         **state,
         "answer": answer,
-        "new_messages": [
-            f"User: {question}",
-            f"Assistant: {answer}"
-        ]
+        "messages": [
+                AIMessage(content=answer)
+            ],
     }

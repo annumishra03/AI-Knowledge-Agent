@@ -1,11 +1,21 @@
+import time
 from app.config.llm import llm
+from langchain_core.messages import AIMessage
+from langsmith import traceable
 
+@traceable
 def generate_answer(state):
     question = state.get("retrieval_query", state['question'])
     context = state.get("context", [])
     context_text = "\n\n".join(context)
-    history = state.get("chat_history", [])
-    history_text = "\n".join(history[-6:])
+    history = state.get("messages", [])
+    history_text = "\n".join(
+        msg.content
+        for msg in history[-10:]
+    )
+
+    summary = state.get("summary", "")
+
     prompt = f"""
     You are a helpful AI assistant.
 
@@ -16,10 +26,12 @@ def generate_answer(state):
     RULES:
     - If user question depends on previous messages, you MUST use chat history.
     - If context is missing, ask a clarification question.
-    - NEVER answer generically if chat history contains relevant entity (movie, person, topic).
+    - NEVER answer generically if chat history or summary contains relevant entity (movie, person, topic).
 
-    Use CONTEXT + CHAT HISTORY.
+    Use CONTEXT + CHAT HISTORY + Summary.
+    Conversation Summary:
 
+    {summary}
     Chat History:
     {history_text}
 
@@ -35,32 +47,42 @@ INSTRUCTIONS:
 4. Only answer directly if fully certain.
     """
 
-    response = llm.invoke(prompt)
-    answer = response.content
+    answer = ""
+    start = time.time()
+    for chunk in llm.stream(prompt):
+        answer += chunk.content
+
     return {
         **state,
         "answer": answer,
-
-        # ONLY DELTA (IMPORTANT)
-        "new_messages": [
-            f"User: {question}",
-            f"Assistant: {answer}"
-        ]
+        "messages": [
+                AIMessage(content=answer)
+            ],
     }
 
+@traceable
 def direct_answer(state):
 
     question = state.get("retrieval_query", state['question'])
     
-    history = state.get("chat_history", [])
-    history_text = "\n".join(history[-6:])  # last few turns
+    summary = state.get("summary", [])
+    history = state.get("messages", [])
+    history_text = "\n".join(
+        msg.content
+        for msg in history[-10:]
+    )
+
     prompt = f"""
     You are a helpful AI assistant.
     Rules
-    - If user question depends on previous messages, you MUST use chat history otherwise dont use.
+    - If user question depends on previous messages, you MUST use chat history and summary otherwise dont use.
     - Chat History empty then answer according to question
     - Don't describe much in answer just upto mark answer if not ask to explain or describe or detail
+    Use CONTEXT + CHAT HISTORY + Summary.
+    Conversation Summary:
 
+    {summary}
+    Chat History:
     Chat History:
     {history_text}
 
@@ -72,15 +94,16 @@ def direct_answer(state):
     3. Only answer directly if fully certain.
     """
 
-    response = llm.invoke(prompt)
-    answer = response.content
+    answer = ""
+    
+    for chunk in llm.stream(prompt):
+        answer += chunk.content
+
+
     return {
         **state,
         "answer": answer,
-
-        # ONLY DELTA (IMPORTANT)
-        "new_messages": [
-            f"User: {question}",
-            f"Assistant: {answer}"
-        ]
+        "messages": [
+            AIMessage(content=answer)
+        ],
     }
