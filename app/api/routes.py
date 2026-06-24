@@ -1,5 +1,5 @@
 import time
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, Depends, UploadFile, File
 import os
 
 from fastapi.responses import StreamingResponse
@@ -16,6 +16,11 @@ route = APIRouter()
 
 from app.memory.redis_memory import RedisSessionStore
 session_store = RedisSessionStore()
+
+from app.auth.dependencies import (
+    get_current_user
+)
+
 @route.get("/")
 def health():
     return {"status": "running"}
@@ -57,8 +62,8 @@ async def upload_documents(file: UploadFile = File(...)):
     }
 
 @route.post("/ask-stream")
-async def ask_stream(req: QuestionRequest):
-
+async def ask_stream(req: QuestionRequest, user = Depends(get_current_user)):
+    print(user)
     state = {
         "messages": [
             HumanMessage(content=req.question)
